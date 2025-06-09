@@ -1,0 +1,87 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow any signed-in user to read users collection
+    match /users/{userId} {
+      // Any authenticated user can read any user document
+      allow read: if request.auth != null;
+      
+      // Users can only write to their own document
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Rules for the chatRooms collection
+    match /chatRooms/{roomId} {
+      // For read operations, handle the case when resource might be null or data might be null
+      // This is important for queries that check if a document exists
+      allow read: if request.auth != null && (
+                    // Case 1: Document exists with participants field
+                    (resource != null && 
+                     resource.data != null && 
+                     resource.data.participants is list &&
+                     request.auth.uid in resource.data.participants) ||
+                    
+                    // Case 2: Document ID contains the user's ID (format: chatRoom_userId1_userId2)
+                    roomId.matches('chatRoom_.*' + request.auth.uid + '.*') ||
+                    
+                    // Case 3: Document ID contains the user's ID (older format: test_userId_timestamp)
+                    roomId.matches('.*' + request.auth.uid + '.*')
+                  );
+      
+      // Allow creation if user is authenticated and their ID is in the participants array
+      // OR the document ID follows the chatRoom pattern with user's ID
+      allow create: if request.auth != null && (
+                     // Standard pattern - user in participants
+                     (request.resource.data.participants is list && 
+                      request.auth.uid in request.resource.data.participants) ||
+                     // Document naming pattern check (chatRoom_userId1_userId2)
+                     (roomId.matches('chatRoom_.*' + request.auth.uid + '.*'))
+                   );
+      
+      // Allow update if user is authenticated and their ID is in the participants array
+      allow update: if request.auth != null && 
+                   resource.data.participants is list &&
+                   request.auth.uid in resource.data.participants;
+      
+      // Allow delete if user is authenticated and their ID is in the participants array
+      allow delete: if request.auth != null && 
+                   resource.data.participants is list &&
+                   request.auth.uid in resource.data.participants;
+      
+      // Rules for the messages subcollection within a chat room
+      match /messages/{messageId} {
+        // Allow read operations based on parent document's participants or document ID pattern
+        allow read: if request.auth != null && (
+                     // Check chatRoom format specifically (chatRoom_userId1_userId2)
+                     roomId.matches('chatRoom_.*' + request.auth.uid + '.*') ||
+                     
+                     // Check test room format (test_userId_timestamp)
+                     roomId.matches('test_' + request.auth.uid + '.*') ||
+                     
+                     // Check if any room ID contains user ID (fallback)
+                     roomId.matches('.*' + request.auth.uid + '.*') ||
+                     
+                     // Normal check against participants field with proper error handling
+                     exists(/databases/$(database)/documents/chatRooms/$(roomId)) && 
+                     get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participants is list &&
+                     request.auth.uid in get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participants
+                   );
+        
+        // Allow create if user is authenticated, in participants, and is the sender
+        allow create: if request.auth != null && 
+                     exists(/databases/$(database)/documents/chatRooms/$(roomId)) &&
+                     get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participants is list &&
+                     request.auth.uid in get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participants &&
+                     request.resource.data.senderId == request.auth.uid;
+        
+        // Allow update/delete if user is the sender
+        allow update, delete: if request.auth != null && 
+                             exists(/databases/$(database)/documents/chatRooms/$(roomId)) &&
+                             get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participants is list &&
+                             request.auth.uid in get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participants &&
+                             resource.data.senderId == request.auth.uid;
+      }
+    }
+  }
+}
