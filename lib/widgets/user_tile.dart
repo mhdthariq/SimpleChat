@@ -39,14 +39,28 @@ class UserTile extends StatelessWidget {
       leading: CircleAvatar(
         backgroundColor: Theme.of(context).colorScheme.primary,
         child:
-            user.photoUrl.isNotEmpty
+            user.photoUrl != null && user.photoUrl!.isNotEmpty
                 ? ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(
+                    20,
+                  ), // Consistent radius with CircleAvatar
                   child: Image.network(
-                    user.photoUrl,
+                    user.photoUrl!,
                     width: 40,
                     height: 40,
                     fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      // Fallback for network image errors
+                      return Text(
+                        user.displayName.isNotEmpty
+                            ? user.displayName[0].toUpperCase()
+                            : '?',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      );
+                    },
                   ),
                 )
                 : Text(

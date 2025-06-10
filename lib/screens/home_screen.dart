@@ -4,7 +4,6 @@ import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/theme_provider.dart';
 import '../models/user_model.dart';
-import '../models/message_model.dart';
 import '../widgets/user_tile.dart';
 import '../utils/page_routes.dart';
 import '../utils/firestore_utils.dart';

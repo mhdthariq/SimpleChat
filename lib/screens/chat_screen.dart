@@ -6,8 +6,7 @@ import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/animation_widgets.dart';
-import '../widgets/typing_indicator.dart';
-import '../widgets/permission_error_dialog.dart';
+// import '../widgets/typing_indicator.dart'; // Commented out as it's not fully implemented
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -16,95 +15,136 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
+  // Added WidgetsBindingObserver
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   File? _selectedImage;
   bool _isUploading = false;
-  bool _isTyping = false;
-  bool _peerIsTyping = false; // This would normally be updated from Firestore
-  bool _hasPermissionError = false;
-  String _errorMessage = '';
+  // bool _isTyping = false; // Local typing state, for future implementation
+  // bool _peerIsTyping = false; // This would be driven by Firestore listener for future implementation
+
+  ChatProvider? _chatProvider;
+  String _lastShownError = '';
+  // AppLifecycleState? _lifecycleState; // To track app lifecycle, for future notification enhancements
 
   @override
   void initState() {
     super.initState();
-    // Check for permission issues on initialization
+    WidgetsBinding.instance.addObserver(this); // Register observer
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkForPermissionIssues();
+      _chatProvider = Provider.of<ChatProvider>(context, listen: false);
+      _chatProvider?.addListener(_handleChatProviderError);
+      _handleChatProviderError(); // Initial check
+
+      // TODO: Implement actual typing indicator logic with Firestore in ChatProvider and listen here.
+      // Example: _chatProvider?.setTypingStatus(true); // when user starts typing
     });
   }
 
-  void _checkForPermissionIssues() {
-    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-
-    // Listen for error changes in the chat provider
-    if (chatProvider.error.contains('permission-denied') ||
-        chatProvider.error.contains('Missing or insufficient permissions')) {
-      setState(() {
-        _hasPermissionError = true;
-        _errorMessage = chatProvider.error;
-      });
-      _showPermissionErrorDialog();
-    }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // setState(() {
+    //   _lifecycleState = state;
+    // });
+    // TODO: Use this state for more robust notification logic in ChatProvider.
+    // ChatProvider could expose a method to update its internal foreground status based on this.
+    super.didChangeAppLifecycleState(state);
   }
 
-  void _showPermissionErrorDialog() {
-    if (!mounted) return;
+  void _handleChatProviderError() {
+    if (!mounted || _chatProvider == null) return;
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder:
-          (context) => PermissionErrorDialog(
-            errorMessage: _errorMessage,
-            onRetry: () {
-              final authProvider = Provider.of<AuthProvider>(
-                context,
-                listen: false,
-              );
-              final chatProvider = Provider.of<ChatProvider>(
-                context,
-                listen: false,
-              );
-
-              if (authProvider.user != null &&
-                  chatProvider.selectedUser != null) {
-                // Retry loading the chat room
-                chatProvider.createAndLoadChatRoom(
-                  authProvider.user!.uid,
-                  chatProvider.selectedUser!.uid,
-                );
-                setState(() {
-                  _hasPermissionError = false;
-                });
-              }
-            },
-          ),
-    );
+    final error = _chatProvider!.error;
+    if (error.isNotEmpty &&
+        (error.contains('permission-denied') ||
+            error.contains('Missing or insufficient permissions'))) {
+      // Avoid showing the same error snackbar multiple times in a row
+      if (error != _lastShownError) {
+        _lastShownError = error;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            // Check mounted again before showing SnackBar
+            ScaffoldMessenger.of(
+              context,
+            ).removeCurrentSnackBar(); // Remove any existing snackbar
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Permission Error: ${error.split('.').first}.',
+                ), // Show a shorter version
+                backgroundColor: Theme.of(context).colorScheme.error,
+                action: SnackBarAction(
+                  label: 'RETRY',
+                  textColor: Theme.of(context).colorScheme.onError,
+                  onPressed: () {
+                    final authProvider = Provider.of<AuthProvider>(
+                      context,
+                      listen: false,
+                    );
+                    if (authProvider.user != null &&
+                        _chatProvider!.selectedUser != null) {
+                      _chatProvider!.createAndLoadChatRoom(
+                        authProvider.user!.uid,
+                        _chatProvider!.selectedUser!.uid,
+                      );
+                      _chatProvider?.clearError(); // Clear error on retry
+                      _lastShownError = ''; // Reset last shown error
+                    }
+                  },
+                ),
+                duration: const Duration(
+                  seconds: 10,
+                ), // Keep it visible longer for user to react
+              ),
+            );
+          }
+        });
+      }
+    } else if (error.isEmpty) {
+      _lastShownError = ''; // Reset if error is cleared
+    }
   }
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _chatProvider?.removeListener(_handleChatProviderError);
+    WidgetsBinding.instance.removeObserver(this); // Unregister observer
+    // TODO: Update typing status to false when user leaves screen if implemented.
+    // Example: _chatProvider?.setTypingStatus(false);
+    ScaffoldMessenger.of(
+      context,
+    ).removeCurrentSnackBar(); // Clean up snackbar on dispose
     super.dispose();
   }
 
   void _sendMessage() {
-    if (_messageController.text.trim().isEmpty) return;
+    // Allow sending if there's text OR an image selected
+    if (_messageController.text.trim().isEmpty && _selectedImage == null)
+      return;
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final chatProvider = Provider.of<ChatProvider>(context, listen: false);
 
     if (authProvider.user != null) {
-      chatProvider.sendMessage(
-        authProvider.user!.uid,
-        _messageController.text.trim(),
-      );
-      _messageController.clear();
+      if (_selectedImage != null) {
+        // If there is an image, call _sendMessageWithImage.
+        // _sendMessageWithImage will handle sending text along with the image.
+        _sendMessageWithImage();
+      } else {
+        // If no image, just send the text message.
+        chatProvider.sendMessage(
+          authProvider.user!.uid,
+          _messageController.text.trim(),
+        );
+        _messageController.clear(); // Clear text only if only text was sent
+      }
+      // Common cleanup for both cases
+      chatProvider.clearError();
+      _lastShownError = '';
 
-      // Scroll to bottom after sending message
       Future.delayed(const Duration(milliseconds: 300), () {
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
@@ -168,6 +208,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendMessageWithImage() async {
+    // This check is now implicitly handled by _sendMessage, but good for direct calls if any.
     if (_selectedImage == null) return;
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -190,6 +231,8 @@ class _ChatScreenState extends State<ChatScreen> {
           _selectedImage = null;
           _isUploading = false;
         });
+        chatProvider.clearError(); // Clear error on successful send
+        _lastShownError = ''; // Reset last shown error after successful send
 
         // Scroll to bottom after sending message
         Future.delayed(const Duration(milliseconds: 300), () {
@@ -212,129 +255,54 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _updateTypingStatus(bool isTyping) {
-    if (_isTyping != isTyping) {
-      setState(() {
-        _isTyping = isTyping;
-      });
-
-      // Here we would normally update Firestore to indicate the user is typing
-      // For now, we'll just simulate the peer typing when we're typing
-      if (isTyping) {
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            setState(() {
-              _peerIsTyping = true;
-            });
-
-            Future.delayed(const Duration(seconds: 3), () {
-              if (mounted) {
-                setState(() {
-                  _peerIsTyping = false;
-                });
-              }
-            });
-          }
-        });
-      }
-    }
-  }
+  // TODO: Implement full typing indicator logic.
+  // The methods below were placeholders and should be replaced with a robust solution
+  // involving Firestore updates and listeners, likely managed via ChatProvider.
+  // void _updateTypingStatus(bool isTyping) { ... }
 
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final chatProvider = Provider.of<ChatProvider>(context);
 
-    // Check for errors in real-time
-    if (chatProvider.error.contains('permission-denied') ||
-        chatProvider.error.contains('Missing or insufficient permissions')) {
-      if (!_hasPermissionError) {
-        setState(() {
-          _hasPermissionError = true;
-          _errorMessage = chatProvider.error;
-        });
-        // Only show the dialog if we just detected the error
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _showPermissionErrorDialog();
-        });
-      }
-    }
-
-    if (_hasPermissionError) {
-      return Scaffold(
-        appBar: AppBar(
-          title: Text(chatProvider.selectedUser?.displayName ?? 'Chat'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.security),
-              tooltip: 'Fix Permission Issues',
-              onPressed: () {
-                _showPermissionErrorDialog();
-              },
-            ),
-          ],
-        ),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.lock,
-                size: 64,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Permission Error',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.error,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Text(
-                  _errorMessage,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.refresh),
-                label: const Text('Try Again'),
-                onPressed: () {
-                  if (authProvider.user != null &&
-                      chatProvider.selectedUser != null) {
-                    // Retry loading the chat room
-                    setState(() {
-                      _hasPermissionError = false;
-                    });
-                    chatProvider.createAndLoadChatRoom(
-                      authProvider.user!.uid,
-                      chatProvider.selectedUser!.uid,
-                    );
-                  }
-                },
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+    // Use safe navigation for displayName, provide default if null
+    String appBarTitle = chatProvider.selectedUser?.displayName ?? 'Chat';
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(chatProvider.selectedUser?.displayName ?? 'Chat'),
+        title: Text(appBarTitle),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.info_outline),
-            onPressed: () {
-              // User profile info could go here
-            },
-          ),
+          // Only show info button if a user is actually selected for the chat
+          if (chatProvider.selectedUser != null)
+            IconButton(
+              icon: const Icon(Icons.info_outline),
+              onPressed: () {
+                // Since we checked selectedUser is not null, we can use !
+                final selectedUser = chatProvider.selectedUser!;
+                String profileTitle = selectedUser.displayName;
+                showDialog(
+                  context: context,
+                  builder:
+                      (context) => AlertDialog(
+                        title: Text(profileTitle),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Email: ${selectedUser.email}'),
+                            // Add more details if available
+                          ],
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Close'),
+                          ),
+                        ],
+                      ),
+                );
+              },
+            ),
         ],
       ),
       body: Column(
@@ -407,6 +375,10 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
             child: Column(
               children: [
+                // TODO: Implement a proper TypingIndicator widget here if _peerIsTyping is true.
+                // This would be driven by data from ChatProvider, which listens to Firestore.
+                // Example: if (chatProvider.isPeerTyping) const TypingIndicator(),
+
                 // Display selected image preview if available
                 if (_selectedImage != null)
                   Container(
@@ -478,41 +450,20 @@ class _ChatScreenState extends State<ChatScreen> {
                         textInputAction: TextInputAction.newline,
                         onChanged: (text) {
                           // Update typing status on text change
-                          _updateTypingStatus(text.isNotEmpty);
+                          // _updateTypingStatus(text.isNotEmpty);
                         },
                       ),
                     ),
-                    IconButton(
-                      icon:
-                          _isUploading
-                              ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                              : Icon(
-                                _selectedImage != null
-                                    ? Icons.send
-                                    : Icons.send,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                      onPressed:
-                          _isUploading
-                              ? null
-                              : () {
-                                if (_selectedImage != null) {
-                                  _sendMessageWithImage();
-                                } else {
-                                  _sendMessage();
-                                }
-                              },
-                    ),
+                    // Consolidated send button logic
+                    if (_isUploading)
+                      const CircularProgressIndicator()
+                    else
+                      IconButton(
+                        icon: const Icon(Icons.send),
+                        onPressed: _sendMessage, // Consolidated send logic
+                      ),
                   ],
                 ),
-                // Peer typing indicator
-                if (_peerIsTyping) TypingIndicator(isTyping: _peerIsTyping),
               ],
             ),
           ),

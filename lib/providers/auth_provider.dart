@@ -17,6 +17,9 @@ class AuthProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   String get error => _error;
   bool get isAuthenticated => _user != null;
+  bool get needsProfileSetup =>
+      _user != null &&
+      (_user!.displayName == null || _user!.displayName!.isEmpty);
 
   AuthProvider() {
     _authService.authStateChanges.listen((User? user) {
@@ -28,10 +31,14 @@ class AuthProvider with ChangeNotifier {
         _authService
             .syncAuthUsersWithFirestore()
             .then((_) {
-              print('Auth to Firestore sync completed successfully');
+              if (kDebugMode) {
+                print('Auth to Firestore sync completed successfully');
+              }
             })
             .catchError((error) {
-              print('Auth to Firestore sync error: $error');
+              if (kDebugMode) {
+                print('Auth to Firestore sync error: $error');
+              }
             });
       } else {
         _userModel = null;
@@ -49,6 +56,16 @@ class AuthProvider with ChangeNotifier {
         _error = e.toString();
         notifyListeners();
       }
+    }
+  }
+
+  Future<void> refreshUser() async {
+    if (_user != null) {
+      await _user!.reload();
+      _user =
+          _authService.currentUser; // Corrected to use the currentUser getter
+      await _fetchUserModel(); // This will update _userModel with new data from Firestore
+      notifyListeners();
     }
   }
 
