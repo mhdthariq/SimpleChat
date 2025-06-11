@@ -55,6 +55,7 @@ dependencies:
   shared_preferences: ^2.2.2
   permission_handler: ^11.3.1 # Added for notification permissions
   flutter_local_notifications: ^17.0.0 # Added for local notifications
+  emoji_picker_flutter: ^2.2.0 # Added for emoji picker
 
 dev_dependencies:
   flutter_test:

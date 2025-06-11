@@ -33,6 +33,15 @@ migrate_working_dir/
 .pub/
 /build/
 
+# Secrets (if any, though not recommended for client-side)
+secrets.json
+*.secret.json
+*.secrets.json
+
+# Environment-specific files
+.env*
+!.env.example
+
 # Symbolication related
 app.*.symbols
 

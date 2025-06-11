@@ -53,11 +53,11 @@ class PermissionChecker {
       // Results
       if (allTestsPassed) {
         print('DEBUG PERMISSION CHECK: All permission tests passed!');
-        _showMessage(
-          context,
-          'Permission Check Passed',
-          'All Firestore permissions are working correctly.',
-        );
+        // _showMessage(
+        //   context,
+        //   'Permission Check Passed',
+        //   'All Firestore permissions are working correctly.',
+        // ); // Commented out to prevent UI message
       } else {
         print('DEBUG PERMISSION CHECK: Some permission tests failed');
         _showMessage(

@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart'; // Added import
+import 'package:flutter/foundation.dart'
+    as foundation; // Added import for defaultTargetPlatform
+
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../widgets/chat_bubble.dart';
@@ -19,8 +23,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // Added WidgetsBindingObserver
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final FocusNode _messageFocusNode = FocusNode(); // Added FocusNode
   File? _selectedImage;
   bool _isUploading = false;
+  bool _showEmojiPicker = false; // Added state for emoji picker visibility
   // bool _isTyping = false; // Local typing state, for future implementation
   // bool _peerIsTyping = false; // This would be driven by Firestore listener for future implementation
 
@@ -34,6 +40,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this); // Register observer
+    _messageFocusNode.addListener(
+      _onFocusChange,
+    ); // Add listener for focus changes
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _chatProvider = Provider.of<ChatProvider>(context, listen: false);
       _chatProvider?.addListener(_handleChatProviderError);
@@ -119,6 +128,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _messageFocusNode.removeListener(_onFocusChange); // Remove listener
+    _messageFocusNode.dispose(); // Dispose FocusNode
     _chatProvider?.removeListener(_handleChatProviderError);
     WidgetsBinding.instance.removeObserver(this); // Unregister observer
     // TODO: Update typing status to false when user leaves screen if implemented.
@@ -261,6 +272,49 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
       }
     }
+  }
+
+  void _onFocusChange() {
+    // Hide emoji picker when text field gains focus (keyboard opens)
+    // and emoji picker was intended to be shown.
+    if (_messageFocusNode.hasFocus && _showEmojiPicker) {
+      setState(() {
+        _showEmojiPicker = false;
+      });
+    }
+  }
+
+  void _toggleEmojiPicker() {
+    if (_showEmojiPicker) {
+      // If emoji picker is shown, hide it and request focus for text field to show keyboard
+      setState(() {
+        _showEmojiPicker = false;
+      });
+      _messageFocusNode.requestFocus();
+    } else {
+      // If emoji picker is hidden, show it and un-focus text field to hide keyboard
+      FocusScope.of(context).unfocus(); // Hide keyboard
+      // Wait for keyboard to hide before showing picker to avoid UI jump
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          // Ensure widget is still mounted
+          setState(() {
+            _showEmojiPicker = true;
+          });
+        }
+      });
+    }
+  }
+
+  // This method is for the EmojiPicker's own backspace button
+  void _onBackspacePressed() {
+    _messageController
+      ..text = _messageController.text.characters.skipLast(1).toString()
+      ..selection = TextSelection.fromPosition(
+        TextPosition(offset: _messageController.text.length),
+      );
+    // Optionally, update typing status based on whether text is empty
+    // _updateTypingStatus(_messageController.text.isNotEmpty);
   }
 
   // TODO: Implement full typing indicator logic.
@@ -437,6 +491,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   children: [
                     IconButton(
                       icon: Icon(
+                        _showEmojiPicker
+                            ? Icons.keyboard_alt_outlined
+                            : Icons.emoji_emotions_outlined, // Toggle icon
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      onPressed: _toggleEmojiPicker,
+                    ),
+                    IconButton(
+                      // This is the existing image picker button
+                      icon: Icon(
                         Icons.add_photo_alternate,
                         color: Theme.of(context).colorScheme.primary,
                       ),
@@ -447,6 +511,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     Expanded(
                       child: TextField(
                         controller: _messageController,
+                        focusNode: _messageFocusNode, // Assign FocusNode
                         decoration: const InputDecoration(
                           hintText: 'Type a message...',
                           border: InputBorder.none,
@@ -471,6 +536,77 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         onPressed: _sendMessage, // Consolidated send logic
                       ),
                   ],
+                ),
+                // Conditionally display EmojiPicker
+                Offstage(
+                  offstage: !_showEmojiPicker,
+                  child: SizedBox(
+                    height: 250, // Overall height for the emoji picker area
+                    child: EmojiPicker(
+                      textEditingController:
+                          _messageController, // Connects to the text field
+                      onBackspacePressed:
+                          _onBackspacePressed, // Handles backspace from emoji picker
+                      config: Config(
+                        // Properties available directly in Config for emoji_picker_flutter v2.2.0
+                        height: 250, // Height of the emoji picker itself
+                        checkPlatformCompatibility: true,
+                        swapCategoryAndBottomBar: false, // Default is false
+
+                        // initCategory: Category.RECENT, // Temporarily removed due to previous errors
+                        // buttonMode: ButtonMode.MATERIAL, // Temporarily removed due to previous errors
+                        emojiViewConfig: EmojiViewConfig(
+                          emojiSizeMax:
+                              28 *
+                              (foundation.defaultTargetPlatform ==
+                                      TargetPlatform.iOS
+                                  ? 1.20
+                                  : 1.0),
+                          columns:
+                              foundation.defaultTargetPlatform ==
+                                      TargetPlatform.iOS
+                                  ? 8
+                                  : 7, // Platform specific column count
+                          backgroundColor:
+                              Theme.of(context).colorScheme.surface,
+                          // recentTabBehavior: RecentTabBehavior.RECENT, // Temporarily removed
+                          // recentsLimit: 28, // Temporarily removed
+                          // noRecents: Text( // Temporarily removed
+                          //   \\'No Recents\\',
+                          //   style: TextStyle(fontSize: 20, color: Colors.black26.withOpacity(0.5)),
+                          //   textAlign: TextAlign.center,
+                          // ),
+                        ),
+
+                        categoryViewConfig: CategoryViewConfig(
+                          backgroundColor:
+                              Theme.of(context).colorScheme.surface,
+                          indicatorColor: Theme.of(context).colorScheme.primary,
+                          iconColorSelected:
+                              Theme.of(context).colorScheme.primary,
+                          iconColor: Colors.grey,
+                          // tabBarHeight: 46, // Optional: Default is 46
+                          // dividerColor: Colors.transparent, // Optional: Default is null
+                        ),
+
+                        bottomActionBarConfig: BottomActionBarConfig(
+                          enabled: true, // Default is true
+                          showBackspaceButton: true, // Default is true
+                          backgroundColor:
+                              Theme.of(context).colorScheme.surface,
+                          buttonColor: Theme.of(
+                            context,
+                          ).colorScheme.surface.withOpacity(
+                            0,
+                          ), // Make button background transparent
+                          buttonIconColor:
+                              Theme.of(context).colorScheme.primary,
+                        ),
+
+                        // searchViewConfig: SearchViewConfig(), // Optional: To customize search
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
