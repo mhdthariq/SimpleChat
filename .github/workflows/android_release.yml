@@ -1,0 +1,137 @@
+name: Android Release Build
+
+on:
+  push:
+    tags:
+      - "v*" # Triggers on tags like v1.0.0, v1.2.3, v1.0.0+10, etc.
+
+jobs:
+  build:
+    name: Build and Release Android App
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.0" # Specify your Flutter version
+          channel: "stable"
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Extract version from tag (e.g., v1.0.0 -> 1.0.0, v1.0.0+10 -> 1.0.0)
+          VERSION_NAME=$(echo ${{ github.ref_name }} | sed 's/^v//' | sed 's/+.*//')
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_OUTPUT
+
+          # Extract build number if present (e.g., v1.0.0+10 -> 10), otherwise use run number
+          if [[ ${{ github.ref_name }} == *"+"* ]]; then
+            VERSION_CODE=$(echo ${{ github.ref_name }} | sed 's/.*+//')
+          else
+            VERSION_CODE=${{ github.run_number }}
+          fi
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_OUTPUT
+
+          echo "Building version: $VERSION_NAME ($VERSION_CODE)"
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Clean Flutter
+        run: flutter clean
+
+      - name: Get Flutter dependencies again
+        run: flutter pub get
+
+      - name: Build Android App Bundle (AAB)
+        run: |
+          flutter build appbundle --release \
+            --build-name=${{ steps.version.outputs.VERSION_NAME }} \
+            --build-number=${{ steps.version.outputs.VERSION_CODE }}
+
+      - name: Build Android APK
+        run: |
+          flutter build apk --release \
+            --build-name=${{ steps.version.outputs.VERSION_NAME }} \
+            --build-number=${{ steps.version.outputs.VERSION_CODE }}
+
+      - name: Rename build artifacts
+        run: |
+          # Rename AAB
+          cp build/app/outputs/bundle/release/app-release.aab \
+             build/app/outputs/bundle/release/SimpleChat-${{ github.ref_name }}-release.aab
+
+          # Rename APK
+          cp build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/SimpleChat-${{ github.ref_name }}-release.apk
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: SimpleChat ${{ github.ref_name }}
+          body: |
+            🚀 **SimpleChat Release ${{ github.ref_name }}**
+
+            **What's New:**
+            - Version: ${{ steps.version.outputs.VERSION_NAME }}
+            - Build Number: ${{ steps.version.outputs.VERSION_CODE }}
+
+            **Download Options:**
+            - **AAB (Recommended for Play Store)**: SimpleChat-${{ github.ref_name }}-release.aab
+            - **APK (Direct Install)**: SimpleChat-${{ github.ref_name }}-release.apk
+
+            **Installation:**
+            - For the APK: Download and install directly on your Android device
+            - For the AAB: Upload to Google Play Store for distribution
+
+            ---
+            *Built automatically with GitHub Actions*
+          draft: false
+          prerelease: false
+
+      - name: Upload AAB to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: build/app/outputs/bundle/release/SimpleChat-${{ github.ref_name }}-release.aab
+          asset_name: SimpleChat-${{ github.ref_name }}-release.aab
+          asset_content_type: application/octet-stream
+
+      - name: Upload APK to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: build/app/outputs/flutter-apk/SimpleChat-${{ github.ref_name }}-release.apk
+          asset_name: SimpleChat-${{ github.ref_name }}-release.apk
+          asset_content_type: application/vnd.android.package-archive
+
+      - name: Build Summary
+        run: |
+          echo "## 🎉 Build Completed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.version.outputs.VERSION_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Number:** ${{ steps.version.outputs.VERSION_CODE }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifacts Created:**" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Android App Bundle (AAB)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Android APK" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** [SimpleChat ${{ github.ref_name }}](${{ steps.create_release.outputs.html_url }})" >> $GITHUB_STEP_SUMMARY

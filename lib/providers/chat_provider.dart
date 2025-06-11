@@ -65,30 +65,30 @@ class ChatProvider with ChangeNotifier {
   // Load chat rooms for a user
   void loadChatRooms(String userId) {
     try {
-      print('Loading chat rooms for user: $userId');
-
       // First try with the index-requiring query
       _firestoreService
           .getChatRooms(userId)
           .listen(
             (chatRooms) {
-              print('Got ${chatRooms.length} chat rooms from Firestore');
               _chatRooms = chatRooms;
               notifyListeners();
             },
             onError: (error) {
-              print('Error getting chat rooms: $error');
+              if (kDebugMode) {
+                print('Error getting chat rooms: $error');
+              }
               if (error.toString().contains('requires an index')) {
-                print('''
+                if (kDebugMode) {
+                  print('''
 ==========================================================
 INDEX ERROR DETECTED: 
-This error happens when the required Firestore index doesn't exist.
+This error happens when the required Firestore index doesn\'t exist.
 Please follow the link in the Firebase console to create it.
 
-Falling back to a simpler query without ordering that doesn't require an index.
+Falling back to a simpler query without ordering that doesn\'t require an index.
 ==========================================================
 ''');
-
+                }
                 // Fallback - try to get chat rooms without ordering
                 _loadChatRoomsWithoutOrdering(userId);
               } else {
@@ -109,7 +109,7 @@ Falling back to a simpler query without ordering that doesn't require an index.
   // Fallback method for loading chat rooms without using an index
   void _loadChatRoomsWithoutOrdering(String userId) {
     try {
-      // Create a simpler query that doesn't require an index
+      // Create a simpler query that doesn\'t require an index
       FirebaseFirestore.instance
           .collection('chatRooms')
           .where('participants', arrayContains: userId)
@@ -121,7 +121,9 @@ Falling back to a simpler query without ordering that doesn't require an index.
                 try {
                   rooms.add(ChatRoom.fromJson(doc.data()));
                 } catch (e) {
-                  print('Error parsing chat room: $e');
+                  if (kDebugMode) {
+                    print('Error parsing chat room: $e');
+                  }
                 }
               }
 
@@ -130,18 +132,20 @@ Falling back to a simpler query without ordering that doesn't require an index.
 
               _chatRooms = rooms;
               notifyListeners();
-
-              print('Loaded ${rooms.length} chat rooms with fallback method');
             },
             onError: (error) {
-              print('Even fallback query failed: $error');
+              if (kDebugMode) {
+                print('Even fallback query failed: $error');
+              }
               _chatRooms = [];
               _error = 'Failed to load chat rooms: $error';
               notifyListeners();
             },
           );
     } catch (e) {
-      print('Exception in fallback chat room loading: $e');
+      if (kDebugMode) {
+        print('Exception in fallback chat room loading: $e');
+      }
       _chatRooms = [];
       _error = e.toString();
       notifyListeners();
@@ -158,49 +162,30 @@ Falling back to a simpler query without ordering that doesn't require an index.
       _error = ''; // Clear any previous errors
       notifyListeners();
 
-      print(
-        'DEBUG: Creating/getting chat room for users: $currentUserId and $peerId',
-      );
-
       try {
         _currentChatRoomId = await _firestoreService.createChatRoom(
           currentUserId,
           peerId,
         );
 
-        print('DEBUG: Chat room ID: $_currentChatRoomId');
-
-        // Get peer user details
-        print('DEBUG: Getting peer user details for: $peerId');
         UserModel? peerUser = await _firestoreService.getUser(peerId);
         if (peerUser != null) {
           _selectedUser = peerUser;
-          print('DEBUG: Peer user loaded: ${peerUser.displayName}');
-        } else {
-          print('DEBUG: Failed to load peer user details');
         }
 
-        // Listen to messages
-        print(
-          'DEBUG: Starting message listener for chat room: $_currentChatRoomId',
-        );
         _firestoreService
             .getMessages(_currentChatRoomId)
             .listen(
               (messages) {
-                print('DEBUG: Received ${messages.length} messages');
                 _messages = messages;
                 // Show notification for new messages
-                final currentUserId = _firebaseAuth.currentUser?.uid;
+                final currentAuthUserId = _firebaseAuth.currentUser?.uid;
                 if (messages.isNotEmpty &&
-                    messages.first.senderId != currentUserId &&
-                    currentUserId != null) {
+                    messages.first.senderId != currentAuthUserId &&
+                    currentAuthUserId != null) {
                   final lastMessage = messages.first;
-                  // Check if the app is in the foreground or if the chat screen for this chat room is active
-                  // This is a basic check; more sophisticated foreground detection might be needed.
-                  // For simplicity, we'll assume for now that if we are listening to messages, the chat is somewhat active.
-                  // A more robust solution would involve checking app lifecycle state and current route.
-
+                  // TODO: Implement more robust foreground detection (e.g., check app lifecycle state and current route)
+                  // For now, this basic check helps avoid self-notifications if the chat is active.
                   _notificationService.showNotification(
                     id:
                         lastMessage.timestamp.millisecondsSinceEpoch %
@@ -215,7 +200,9 @@ Falling back to a simpler query without ordering that doesn't require an index.
                 notifyListeners();
               },
               onError: (error) {
-                print('DEBUG ERROR: Failed to get messages: $error');
+                if (kDebugMode) {
+                  print('DEBUG ERROR: Failed to get messages: $error');
+                }
                 _error = 'Failed to load messages: $error';
                 notifyListeners();
               },
@@ -223,7 +210,11 @@ Falling back to a simpler query without ordering that doesn't require an index.
       } catch (e) {
         // Special handling for permission errors
         if (e.toString().contains('permission-denied')) {
-          print('DEBUG ERROR: Permission denied when accessing chat room: $e');
+          if (kDebugMode) {
+            print(
+              'DEBUG ERROR: Permission denied when accessing chat room: $e',
+            );
+          }
           _error = 'Permission denied: $e. Please check Firestore rules.';
 
           // Even though we had an error, still set the user so we can retry
@@ -243,6 +234,11 @@ Falling back to a simpler query without ordering that doesn't require an index.
       _error = e.toString();
       notifyListeners();
     }
+  }
+
+  void clearError() {
+    _error = '';
+    notifyListeners();
   }
 
   // Send a message
@@ -293,7 +289,9 @@ Falling back to a simpler query without ordering that doesn't require an index.
       await _firestoreService.updateUserStatus(userId, isOnline);
     } catch (e) {
       // Just log the error instead of updating state to prevent UI issues during logout
-      print('Error updating user status: $e');
+      if (kDebugMode) {
+        print('Error updating user status: $e');
+      }
     }
   }
 
@@ -308,13 +306,8 @@ Falling back to a simpler query without ordering that doesn't require an index.
       );
       return _users.firstWhere((user) => user.uid == peerId);
     } catch (e) {
-      return null;
+      return null; // Return null if not found or error occurs
     }
-  }
-
-  void clearError() {
-    _error = '';
-    notifyListeners();
   }
 
   void clearSelectedUser() {

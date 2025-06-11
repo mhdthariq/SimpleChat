@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart'; // Added import
+import 'package:flutter/foundation.dart'
+    as foundation; // Added import for defaultTargetPlatform
+
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/animation_widgets.dart';
-import '../widgets/typing_indicator.dart';
-import '../widgets/permission_error_dialog.dart';
+// import '../widgets/typing_indicator.dart'; // Commented out as it's not fully implemented
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -16,95 +19,151 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
+  // Added WidgetsBindingObserver
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final FocusNode _messageFocusNode = FocusNode(); // Added FocusNode
   File? _selectedImage;
   bool _isUploading = false;
-  bool _isTyping = false;
-  bool _peerIsTyping = false; // This would normally be updated from Firestore
-  bool _hasPermissionError = false;
-  String _errorMessage = '';
+  bool _showEmojiPicker = false; // Added state for emoji picker visibility
+  // bool _isTyping = false; // Local typing state, for future implementation
+  // bool _peerIsTyping = false; // This would be driven by Firestore listener for future implementation
+
+  ChatProvider? _chatProvider;
+  String _lastShownError = '';
+  ScaffoldMessengerState?
+  _scaffoldMessengerState; // Added for safe ScaffoldMessenger access
+  // AppLifecycleState? _lifecycleState; // To track app lifecycle, for future notification enhancements
 
   @override
   void initState() {
     super.initState();
-    // Check for permission issues on initialization
+    WidgetsBinding.instance.addObserver(this); // Register observer
+    _messageFocusNode.addListener(
+      _onFocusChange,
+    ); // Add listener for focus changes
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkForPermissionIssues();
+      _chatProvider = Provider.of<ChatProvider>(context, listen: false);
+      _chatProvider?.addListener(_handleChatProviderError);
+      _handleChatProviderError(); // Initial check
+
+      // TODO: Implement actual typing indicator logic with Firestore in ChatProvider and listen here.
+      // Example: _chatProvider?.setTypingStatus(true); // when user starts typing
     });
   }
 
-  void _checkForPermissionIssues() {
-    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-
-    // Listen for error changes in the chat provider
-    if (chatProvider.error.contains('permission-denied') ||
-        chatProvider.error.contains('Missing or insufficient permissions')) {
-      setState(() {
-        _hasPermissionError = true;
-        _errorMessage = chatProvider.error;
-      });
-      _showPermissionErrorDialog();
-    }
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Store the ScaffoldMessengerState. This is safer than calling ScaffoldMessenger.of(context)
+    // repeatedly, especially in dispose or async callbacks.
+    _scaffoldMessengerState = ScaffoldMessenger.of(context);
   }
 
-  void _showPermissionErrorDialog() {
-    if (!mounted) return;
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // setState(() {
+    //   _lifecycleState = state;
+    // });
+    // TODO: Use this state for more robust notification logic in ChatProvider.
+    // ChatProvider could expose a method to update its internal foreground status based on this.
+    super.didChangeAppLifecycleState(state);
+  }
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder:
-          (context) => PermissionErrorDialog(
-            errorMessage: _errorMessage,
-            onRetry: () {
-              final authProvider = Provider.of<AuthProvider>(
-                context,
-                listen: false,
-              );
-              final chatProvider = Provider.of<ChatProvider>(
-                context,
-                listen: false,
-              );
+  void _handleChatProviderError() {
+    if (!mounted || _chatProvider == null) return;
 
-              if (authProvider.user != null &&
-                  chatProvider.selectedUser != null) {
-                // Retry loading the chat room
-                chatProvider.createAndLoadChatRoom(
-                  authProvider.user!.uid,
-                  chatProvider.selectedUser!.uid,
-                );
-                setState(() {
-                  _hasPermissionError = false;
-                });
-              }
-            },
-          ),
-    );
+    final error = _chatProvider!.error;
+    if (error.isNotEmpty &&
+        (error.contains('permission-denied') ||
+            error.contains('Missing or insufficient permissions'))) {
+      // Avoid showing the same error snackbar multiple times in a row
+      if (error != _lastShownError) {
+        _lastShownError = error;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            // Check mounted again before showing SnackBar
+            _scaffoldMessengerState
+                ?.removeCurrentSnackBar(); // Remove any existing snackbar
+            _scaffoldMessengerState?.showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Permission Error: ${error.split('.').first}.',
+                ), // Show a shorter version
+                backgroundColor: Theme.of(context).colorScheme.error,
+                action: SnackBarAction(
+                  label: 'RETRY',
+                  textColor: Theme.of(context).colorScheme.onError,
+                  onPressed: () {
+                    final authProvider = Provider.of<AuthProvider>(
+                      context,
+                      listen: false,
+                    );
+                    if (authProvider.user != null &&
+                        _chatProvider!.selectedUser != null) {
+                      _chatProvider!.createAndLoadChatRoom(
+                        authProvider.user!.uid,
+                        _chatProvider!.selectedUser!.uid,
+                      );
+                      _chatProvider?.clearError(); // Clear error on retry
+                      _lastShownError = ''; // Reset last shown error
+                    }
+                  },
+                ),
+                duration: const Duration(
+                  seconds: 10,
+                ), // Keep it visible longer for user to react
+              ),
+            );
+          }
+        });
+      }
+    } else if (error.isEmpty) {
+      _lastShownError = ''; // Reset if error is cleared
+    }
   }
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _messageFocusNode.removeListener(_onFocusChange); // Remove listener
+    _messageFocusNode.dispose(); // Dispose FocusNode
+    _chatProvider?.removeListener(_handleChatProviderError);
+    WidgetsBinding.instance.removeObserver(this); // Unregister observer
+    // TODO: Update typing status to false when user leaves screen if implemented.
+    // Example: _chatProvider?.setTypingStatus(false);
+    _scaffoldMessengerState
+        ?.removeCurrentSnackBar(); // Clean up snackbar on dispose
     super.dispose();
   }
 
   void _sendMessage() {
-    if (_messageController.text.trim().isEmpty) return;
+    // Allow sending if there's text OR an image selected
+    if (_messageController.text.trim().isEmpty && _selectedImage == null)
+      return;
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final chatProvider = Provider.of<ChatProvider>(context, listen: false);
 
     if (authProvider.user != null) {
-      chatProvider.sendMessage(
-        authProvider.user!.uid,
-        _messageController.text.trim(),
-      );
-      _messageController.clear();
+      if (_selectedImage != null) {
+        // If there is an image, call _sendMessageWithImage.
+        // _sendMessageWithImage will handle sending text along with the image.
+        _sendMessageWithImage();
+      } else {
+        // If no image, just send the text message.
+        chatProvider.sendMessage(
+          authProvider.user!.uid,
+          _messageController.text.trim(),
+        );
+        _messageController.clear(); // Clear text only if only text was sent
+      }
+      // Common cleanup for both cases
+      chatProvider.clearError();
+      _lastShownError = '';
 
-      // Scroll to bottom after sending message
       Future.delayed(const Duration(milliseconds: 300), () {
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
@@ -131,9 +190,9 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error picking image: $e')));
+      _scaffoldMessengerState?.showSnackBar(
+        SnackBar(content: Text('Error picking image: $e')),
+      );
     }
   }
 
@@ -168,6 +227,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendMessageWithImage() async {
+    // This check is now implicitly handled by _sendMessage, but good for direct calls if any.
     if (_selectedImage == null) return;
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -190,6 +250,8 @@ class _ChatScreenState extends State<ChatScreen> {
           _selectedImage = null;
           _isUploading = false;
         });
+        chatProvider.clearError(); // Clear error on successful send
+        _lastShownError = ''; // Reset last shown error after successful send
 
         // Scroll to bottom after sending message
         Future.delayed(const Duration(milliseconds: 300), () {
@@ -205,136 +267,104 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() {
           _isUploading = false;
         });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error sending image: $e')));
+        _scaffoldMessengerState?.showSnackBar(
+          SnackBar(content: Text('Error sending image: $e')),
+        );
       }
     }
   }
 
-  void _updateTypingStatus(bool isTyping) {
-    if (_isTyping != isTyping) {
+  void _onFocusChange() {
+    // Hide emoji picker when text field gains focus (keyboard opens)
+    // and emoji picker was intended to be shown.
+    if (_messageFocusNode.hasFocus && _showEmojiPicker) {
       setState(() {
-        _isTyping = isTyping;
+        _showEmojiPicker = false;
       });
-
-      // Here we would normally update Firestore to indicate the user is typing
-      // For now, we'll just simulate the peer typing when we're typing
-      if (isTyping) {
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            setState(() {
-              _peerIsTyping = true;
-            });
-
-            Future.delayed(const Duration(seconds: 3), () {
-              if (mounted) {
-                setState(() {
-                  _peerIsTyping = false;
-                });
-              }
-            });
-          }
-        });
-      }
     }
   }
+
+  void _toggleEmojiPicker() {
+    if (_showEmojiPicker) {
+      // If emoji picker is shown, hide it and request focus for text field to show keyboard
+      setState(() {
+        _showEmojiPicker = false;
+      });
+      _messageFocusNode.requestFocus();
+    } else {
+      // If emoji picker is hidden, show it and un-focus text field to hide keyboard
+      FocusScope.of(context).unfocus(); // Hide keyboard
+      // Wait for keyboard to hide before showing picker to avoid UI jump
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          // Ensure widget is still mounted
+          setState(() {
+            _showEmojiPicker = true;
+          });
+        }
+      });
+    }
+  }
+
+  // This method is for the EmojiPicker's own backspace button
+  void _onBackspacePressed() {
+    _messageController
+      ..text = _messageController.text.characters.skipLast(1).toString()
+      ..selection = TextSelection.fromPosition(
+        TextPosition(offset: _messageController.text.length),
+      );
+    // Optionally, update typing status based on whether text is empty
+    // _updateTypingStatus(_messageController.text.isNotEmpty);
+  }
+
+  // TODO: Implement full typing indicator logic.
+  // The methods below were placeholders and should be replaced with a robust solution
+  // involving Firestore updates and listeners, likely managed via ChatProvider.
+  // void _updateTypingStatus(bool isTyping) { ... }
 
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final chatProvider = Provider.of<ChatProvider>(context);
 
-    // Check for errors in real-time
-    if (chatProvider.error.contains('permission-denied') ||
-        chatProvider.error.contains('Missing or insufficient permissions')) {
-      if (!_hasPermissionError) {
-        setState(() {
-          _hasPermissionError = true;
-          _errorMessage = chatProvider.error;
-        });
-        // Only show the dialog if we just detected the error
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _showPermissionErrorDialog();
-        });
-      }
-    }
-
-    if (_hasPermissionError) {
-      return Scaffold(
-        appBar: AppBar(
-          title: Text(chatProvider.selectedUser?.displayName ?? 'Chat'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.security),
-              tooltip: 'Fix Permission Issues',
-              onPressed: () {
-                _showPermissionErrorDialog();
-              },
-            ),
-          ],
-        ),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.lock,
-                size: 64,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Permission Error',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.error,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Text(
-                  _errorMessage,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.refresh),
-                label: const Text('Try Again'),
-                onPressed: () {
-                  if (authProvider.user != null &&
-                      chatProvider.selectedUser != null) {
-                    // Retry loading the chat room
-                    setState(() {
-                      _hasPermissionError = false;
-                    });
-                    chatProvider.createAndLoadChatRoom(
-                      authProvider.user!.uid,
-                      chatProvider.selectedUser!.uid,
-                    );
-                  }
-                },
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+    // Use safe navigation for displayName, provide default if null
+    String appBarTitle = chatProvider.selectedUser?.displayName ?? 'Chat';
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(chatProvider.selectedUser?.displayName ?? 'Chat'),
+        title: Text(appBarTitle),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.info_outline),
-            onPressed: () {
-              // User profile info could go here
-            },
-          ),
+          // Only show info button if a user is actually selected for the chat
+          if (chatProvider.selectedUser != null)
+            IconButton(
+              icon: const Icon(Icons.info_outline),
+              onPressed: () {
+                // Since we checked selectedUser is not null, we can use !
+                final selectedUser = chatProvider.selectedUser!;
+                String profileTitle = selectedUser.displayName;
+                showDialog(
+                  context: context,
+                  builder:
+                      (context) => AlertDialog(
+                        title: Text(profileTitle),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Email: ${selectedUser.email}'),
+                            // Add more details if available
+                          ],
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Close'),
+                          ),
+                        ],
+                      ),
+                );
+              },
+            ),
         ],
       ),
       body: Column(
@@ -407,6 +437,10 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
             child: Column(
               children: [
+                // TODO: Implement a proper TypingIndicator widget here if _peerIsTyping is true.
+                // This would be driven by data from ChatProvider, which listens to Firestore.
+                // Example: if (chatProvider.isPeerTyping) const TypingIndicator(),
+
                 // Display selected image preview if available
                 if (_selectedImage != null)
                   Container(
@@ -457,6 +491,16 @@ class _ChatScreenState extends State<ChatScreen> {
                   children: [
                     IconButton(
                       icon: Icon(
+                        _showEmojiPicker
+                            ? Icons.keyboard_alt_outlined
+                            : Icons.emoji_emotions_outlined, // Toggle icon
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      onPressed: _toggleEmojiPicker,
+                    ),
+                    IconButton(
+                      // This is the existing image picker button
+                      icon: Icon(
                         Icons.add_photo_alternate,
                         color: Theme.of(context).colorScheme.primary,
                       ),
@@ -467,6 +511,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     Expanded(
                       child: TextField(
                         controller: _messageController,
+                        focusNode: _messageFocusNode, // Assign FocusNode
                         decoration: const InputDecoration(
                           hintText: 'Type a message...',
                           border: InputBorder.none,
@@ -478,41 +523,91 @@ class _ChatScreenState extends State<ChatScreen> {
                         textInputAction: TextInputAction.newline,
                         onChanged: (text) {
                           // Update typing status on text change
-                          _updateTypingStatus(text.isNotEmpty);
+                          // _updateTypingStatus(text.isNotEmpty);
                         },
                       ),
                     ),
-                    IconButton(
-                      icon:
-                          _isUploading
-                              ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                              : Icon(
-                                _selectedImage != null
-                                    ? Icons.send
-                                    : Icons.send,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                      onPressed:
-                          _isUploading
-                              ? null
-                              : () {
-                                if (_selectedImage != null) {
-                                  _sendMessageWithImage();
-                                } else {
-                                  _sendMessage();
-                                }
-                              },
-                    ),
+                    // Consolidated send button logic
+                    if (_isUploading)
+                      const CircularProgressIndicator()
+                    else
+                      IconButton(
+                        icon: const Icon(Icons.send),
+                        onPressed: _sendMessage, // Consolidated send logic
+                      ),
                   ],
                 ),
-                // Peer typing indicator
-                if (_peerIsTyping) TypingIndicator(isTyping: _peerIsTyping),
+                // Conditionally display EmojiPicker
+                Offstage(
+                  offstage: !_showEmojiPicker,
+                  child: SizedBox(
+                    height: 250, // Overall height for the emoji picker area
+                    child: EmojiPicker(
+                      textEditingController:
+                          _messageController, // Connects to the text field
+                      onBackspacePressed:
+                          _onBackspacePressed, // Handles backspace from emoji picker
+                      config: Config(
+                        // Properties available directly in Config for emoji_picker_flutter v2.2.0
+                        height: 250, // Height of the emoji picker itself
+                        checkPlatformCompatibility: true,
+                        swapCategoryAndBottomBar: false, // Default is false
+
+                        // initCategory: Category.RECENT, // Temporarily removed due to previous errors
+                        // buttonMode: ButtonMode.MATERIAL, // Temporarily removed due to previous errors
+                        emojiViewConfig: EmojiViewConfig(
+                          emojiSizeMax:
+                              28 *
+                              (foundation.defaultTargetPlatform ==
+                                      TargetPlatform.iOS
+                                  ? 1.20
+                                  : 1.0),
+                          columns:
+                              foundation.defaultTargetPlatform ==
+                                      TargetPlatform.iOS
+                                  ? 8
+                                  : 7, // Platform specific column count
+                          backgroundColor:
+                              Theme.of(context).colorScheme.surface,
+                          // recentTabBehavior: RecentTabBehavior.RECENT, // Temporarily removed
+                          // recentsLimit: 28, // Temporarily removed
+                          // noRecents: Text( // Temporarily removed
+                          //   \\'No Recents\\',
+                          //   style: TextStyle(fontSize: 20, color: Colors.black26.withOpacity(0.5)),
+                          //   textAlign: TextAlign.center,
+                          // ),
+                        ),
+
+                        categoryViewConfig: CategoryViewConfig(
+                          backgroundColor:
+                              Theme.of(context).colorScheme.surface,
+                          indicatorColor: Theme.of(context).colorScheme.primary,
+                          iconColorSelected:
+                              Theme.of(context).colorScheme.primary,
+                          iconColor: Colors.grey,
+                          // tabBarHeight: 46, // Optional: Default is 46
+                          // dividerColor: Colors.transparent, // Optional: Default is null
+                        ),
+
+                        bottomActionBarConfig: BottomActionBarConfig(
+                          enabled: true, // Default is true
+                          showBackspaceButton: true, // Default is true
+                          backgroundColor:
+                              Theme.of(context).colorScheme.surface,
+                          buttonColor: Theme.of(
+                            context,
+                          ).colorScheme.surface.withOpacity(
+                            0,
+                          ), // Make button background transparent
+                          buttonIconColor:
+                              Theme.of(context).colorScheme.primary,
+                        ),
+
+                        // searchViewConfig: SearchViewConfig(), // Optional: To customize search
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

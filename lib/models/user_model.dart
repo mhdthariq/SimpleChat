@@ -5,14 +5,14 @@ class UserModel {
   final String uid;
   final String email;
   final String displayName;
-  final String photoUrl;
+  final String? photoUrl; // Changed to nullable String
   final Timestamp lastSeen;
 
   UserModel({
     required this.uid,
     required this.email,
     required this.displayName,
-    this.photoUrl = '',
+    this.photoUrl, // Removed default value here, handled in fromJson
     required this.lastSeen,
   });
 
@@ -21,7 +21,7 @@ class UserModel {
       uid: json['uid'] ?? '',
       email: json['email'] ?? '',
       displayName: json['displayName'] ?? '',
-      photoUrl: json['photoUrl'] ?? '',
+      photoUrl: json['photoUrl'], // Directly assign, can be null
       lastSeen: json['lastSeen'] ?? Timestamp.now(),
     );
   }
