@@ -1,0 +1,27 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Rules for user profile pictures
+    // This path should match the structure you use in your Flutter app
+    // (e.g., 'profile_pictures/{userId}/profile_pic.jpg').
+    match /profile_pictures/{userId}/{allPaths=**} {
+      // Allow anyone to read profile pictures.
+      // Change to 'if request.auth != null;' if only authenticated users should see them.
+      allow read: if true;
+
+      // Allow authenticated users to write (upload, update, delete)
+      // only to their own profile picture path.
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Example for chat images (if you implement sending images in chat)
+    // match /chat_images/{chatId}/{messageId}/{fileName} {
+    //   allow read: if request.auth != null && /* logic to check if user is part of chatId */;
+    //   allow write: if request.auth != null && /* logic to check if user is sender in chatId */;
+    // }
+
+    // By default, if no other rule matches, access is denied.
+    // You don't need a global "deny all" if your specific paths are covered.
+  }
+}

@@ -11,7 +11,9 @@ class StorageService {
       String fileExtension = p.extension(imageFile.path);
       Reference ref = _storage
           .ref()
-          .child('user_profiles')
+          .child(
+            'profile_pictures',
+          ) // Changed 'user_profiles' to 'profile_pictures'
           .child(userId)
           .child('profile_picture$fileExtension');
 
@@ -38,7 +40,9 @@ class StorageService {
     try {
       Reference ref = _storage
           .ref()
-          .child('user_profiles')
+          .child(
+            'profile_pictures',
+          ) // Changed 'user_profiles' to 'profile_pictures'
           .child(userId)
           .child(fileName); // You'd need to store/construct the full file name
       await ref.delete();

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
+import 'package:firebase_app_check/firebase_app_check.dart'; // Import App Check
+import 'package:flutter/foundation.dart'; // Import for kDebugMode
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
@@ -16,6 +18,14 @@ import 'package:simple_chat/services/notification_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // Initialize App Check
+  await FirebaseAppCheck.instance.activate(
+    // Use Play Integrity provider for Android in release, debug provider in debug
+    androidProvider:
+        kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+    // Use App Attest provider for Apple platforms (requires configuration in Xcode)
+    appleProvider: AppleProvider.appAttest,
+  );
   await NotificationService().initialize(); // Initialize NotificationService
 
   runApp(const MyApp());

@@ -26,6 +26,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   ChatProvider? _chatProvider;
   String _lastShownError = '';
+  ScaffoldMessengerState?
+  _scaffoldMessengerState; // Added for safe ScaffoldMessenger access
   // AppLifecycleState? _lifecycleState; // To track app lifecycle, for future notification enhancements
 
   @override
@@ -40,6 +42,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // TODO: Implement actual typing indicator logic with Firestore in ChatProvider and listen here.
       // Example: _chatProvider?.setTypingStatus(true); // when user starts typing
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Store the ScaffoldMessengerState. This is safer than calling ScaffoldMessenger.of(context)
+    // repeatedly, especially in dispose or async callbacks.
+    _scaffoldMessengerState = ScaffoldMessenger.of(context);
   }
 
   @override
@@ -65,10 +75,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             // Check mounted again before showing SnackBar
-            ScaffoldMessenger.of(
-              context,
-            ).removeCurrentSnackBar(); // Remove any existing snackbar
-            ScaffoldMessenger.of(context).showSnackBar(
+            _scaffoldMessengerState
+                ?.removeCurrentSnackBar(); // Remove any existing snackbar
+            _scaffoldMessengerState?.showSnackBar(
               SnackBar(
                 content: Text(
                   'Permission Error: ${error.split('.').first}.',
@@ -114,9 +123,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this); // Unregister observer
     // TODO: Update typing status to false when user leaves screen if implemented.
     // Example: _chatProvider?.setTypingStatus(false);
-    ScaffoldMessenger.of(
-      context,
-    ).removeCurrentSnackBar(); // Clean up snackbar on dispose
+    _scaffoldMessengerState
+        ?.removeCurrentSnackBar(); // Clean up snackbar on dispose
     super.dispose();
   }
 
@@ -171,9 +179,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         });
       }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error picking image: $e')));
+      _scaffoldMessengerState?.showSnackBar(
+        SnackBar(content: Text('Error picking image: $e')),
+      );
     }
   }
 
@@ -248,9 +256,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         setState(() {
           _isUploading = false;
         });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error sending image: $e')));
+        _scaffoldMessengerState?.showSnackBar(
+          SnackBar(content: Text('Error sending image: $e')),
+        );
       }
     }
   }

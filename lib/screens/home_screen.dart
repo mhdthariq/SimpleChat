@@ -204,7 +204,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         color:
                             _isUsersView
                                 ? Theme.of(context).colorScheme.primary
-                                : Theme.of(context).colorScheme.surfaceContainerHighest,
+                                : Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
                         borderRadius: const BorderRadius.only(
                           topLeft: Radius.circular(12.0),
                           bottomLeft: Radius.circular(12.0),
@@ -235,7 +237,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         color:
                             !_isUsersView
                                 ? Theme.of(context).colorScheme.primary
-                                : Theme.of(context).colorScheme.surfaceContainerHighest,
+                                : Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
                         borderRadius: const BorderRadius.only(
                           topRight: Radius.circular(12.0),
                           bottomRight: Radius.circular(12.0),
