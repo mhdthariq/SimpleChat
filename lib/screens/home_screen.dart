@@ -4,11 +4,11 @@ import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/theme_provider.dart';
 import '../models/user_model.dart';
-import '../widgets/user_tile.dart';
+import '../widgets/user_tile.dart'; // Ensured UserTile import
 import '../utils/page_routes.dart';
 import '../utils/firestore_utils.dart';
-import '../utils/permission_checker.dart';
 import 'chat_screen.dart';
+import 'profile_screen.dart'; // Ensured ProfileScreen import
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -25,28 +25,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Initialize providers
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final chatProvider = Provider.of<ChatProvider>(context, listen: false);
 
-    // Load users - filter out current user
     if (authProvider.user != null) {
       chatProvider.loadUsers(currentUserId: authProvider.user!.uid);
-
-      // Load chat rooms
       chatProvider.loadChatRooms(authProvider.user!.uid);
       chatProvider.updateUserStatus(authProvider.user!.uid, true);
 
-      // Check permissions after a short delay to ensure everything is initialized
-      Future.delayed(const Duration(seconds: 1), () {
-        if (mounted) {
-          PermissionChecker.checkPermissions(context);
-        }
-      });
-
-      // Also do an immediate refresh to ensure we have the latest data
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        chatProvider.refreshUsers(currentUserId: authProvider.user!.uid);
+        if (mounted && authProvider.user != null) {
+          chatProvider.refreshUsers(currentUserId: authProvider.user!.uid);
+        }
       });
     } else {
       chatProvider.loadUsers();
@@ -61,13 +51,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (authProvider.user != null) {
       if (state == AppLifecycleState.resumed) {
-        // User is online
         chatProvider.updateUserStatus(authProvider.user!.uid, true);
-        // Refresh data when app is resumed
         chatProvider.refreshUsers(currentUserId: authProvider.user!.uid);
         chatProvider.loadChatRooms(authProvider.user!.uid);
       } else {
-        // User is offline
         chatProvider.updateUserStatus(authProvider.user!.uid, false);
       }
     }
@@ -87,7 +74,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       chatProvider
           .createAndLoadChatRoom(authProvider.user!.uid, peerUser.uid)
           .then((_) {
-            Navigator.push(context, PageRoutes.slideRoute(const ChatScreen()));
+            if (mounted) {
+              // Added mounted check
+              Navigator.push(
+                context,
+                PageRoutes.slideRoute(const ChatScreen()),
+              );
+            }
           });
     }
   }
@@ -97,42 +90,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
 
-      // Update online status to false before signing out
       if (authProvider.user != null) {
         await chatProvider.updateUserStatus(authProvider.user!.uid, false);
       }
-
-      // Clear selected user in chat provider
       chatProvider.clearSelectedUser();
-
-      // Sign out
       await authProvider.signOut();
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error signing out: $e')));
+      if (mounted) {
+        // Added mounted check
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error signing out: $e')));
+      }
     }
   }
 
   void _showErrorDialog(String errorMessage) {
-    // Use our enhanced error handling from FirestoreUtils
-    FirestoreUtils.handleFirestoreError(context, errorMessage);
-  }
-
-  // Method to check Firestore permissions
-  void _checkPermissions() {
-    PermissionChecker.checkPermissions(context).then((passed) {
-      if (passed) {
-        // Refresh data since permissions are fixed
-        final authProvider = Provider.of<AuthProvider>(context, listen: false);
-        final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-
-        if (authProvider.user != null) {
-          chatProvider.loadUsers(currentUserId: authProvider.user!.uid);
-          chatProvider.loadChatRooms(authProvider.user!.uid);
-        }
-      }
-    });
+    if (mounted) {
+      // Added mounted check
+      FirestoreUtils.handleFirestoreError(context, errorMessage);
+    }
   }
 
   @override
@@ -140,40 +117,73 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final authProvider = Provider.of<AuthProvider>(context);
     final chatProvider = Provider.of<ChatProvider>(context);
 
-    // Check for errors and show a dialog if there's an error
     if (chatProvider.error.isNotEmpty) {
-      // We only want to show the error dialog once, so let's use a post-frame callback
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _showErrorDialog(chatProvider.error);
-        chatProvider.clearError(); // Clear the error after showing it
+        chatProvider.clearError();
       });
     }
 
-    // Filter out the current user from the users list and sort by name
     List<UserModel> filteredUsers =
         chatProvider.users
             .where((user) => user.uid != authProvider.user?.uid)
             .toList();
-
-    // Sort users by name for better UX
     filteredUsers.sort((a, b) => a.displayName.compareTo(b.displayName));
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('SimpleChat'),
         actions: [
-          // Add permission check button to help fix issues
-          IconButton(
-            icon: const Icon(Icons.security),
-            tooltip: 'Fix Permission Issues',
-            onPressed: () {
-              // Run permission checker
-              PermissionChecker.checkPermissions(context).then((passed) {
-                if (passed && authProvider.user != null) {
-                  chatProvider.loadUsers(currentUserId: authProvider.user!.uid);
-                  chatProvider.loadChatRooms(authProvider.user!.uid);
-                }
-              });
+          Consumer<AuthProvider>(
+            builder: (context, authProvider, child) {
+              final userModel = authProvider.userModel;
+              final firebaseUser = authProvider.user;
+              ImageProvider? profileImageProvider;
+              String initial = '?'; // Default initial
+
+              // Check for profile picture URL
+              if (userModel?.photoUrl?.isNotEmpty ?? false) {
+                profileImageProvider = NetworkImage(userModel!.photoUrl!);
+              }
+              // Else, check for display name initial
+              else if (userModel?.displayName?.isNotEmpty ?? false) {
+                initial = userModel!.displayName![0].toUpperCase();
+              }
+              // Else, check for email initial
+              else if (firebaseUser?.email?.isNotEmpty ?? false) {
+                initial = firebaseUser!.email![0].toUpperCase();
+              }
+
+              return IconButton(
+                icon: CircleAvatar(
+                  radius: 18,
+                  backgroundImage: profileImageProvider,
+                  backgroundColor:
+                      profileImageProvider == null
+                          ? Theme.of(context).colorScheme.primaryContainer
+                          : Colors.transparent,
+                  child:
+                      profileImageProvider == null
+                          ? Text(
+                            initial,
+                            style: TextStyle(
+                              color:
+                                  Theme.of(
+                                    context,
+                                  ).colorScheme.onPrimaryContainer,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          )
+                          : null,
+                ),
+                tooltip: 'Profile',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    PageRoutes.slideRoute(const ProfileScreen()),
+                  );
+                },
+              );
             },
           ),
           IconButton(
@@ -353,10 +363,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildChatsList(AuthProvider authProvider, ChatProvider chatProvider) {
     Future<void> handleRefresh() async {
       if (authProvider.user != null) {
-        // Reload chat rooms
         chatProvider.loadChatRooms(authProvider.user!.uid);
-
-        // Also refresh users to ensure we have the latest data
         await chatProvider.refreshUsers(currentUserId: authProvider.user!.uid);
       }
     }
@@ -387,27 +394,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     style: TextStyle(fontSize: 14),
                   ),
                   const SizedBox(height: 24),
-                  // Add button to check permissions when no chats are shown
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.security),
-                    label: const Text('Check Permissions'),
-                    onPressed: () {
-                      // Check Firestore permissions
-                      PermissionChecker.checkPermissions(context).then((
-                        passed,
-                      ) {
-                        if (passed) {
-                          // Refresh data since permissions are fixed
-                          if (authProvider.user != null) {
-                            chatProvider.loadUsers(
-                              currentUserId: authProvider.user!.uid,
-                            );
-                            chatProvider.loadChatRooms(authProvider.user!.uid);
-                          }
-                        }
-                      });
-                    },
-                  ),
                 ],
               ),
             ),

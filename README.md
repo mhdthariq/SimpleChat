@@ -75,6 +75,7 @@ For the app to work correctly, ensure your Firebase project is configured with:
    - Appropriate security rules (see `storage.rules` in this project).
 4. **Firebase App Check**:
    - Enable for your project.
+   - **Enable the "Firebase App Check API"** in the Google Cloud Console for your Firebase project (e.g., by visiting `https://console.developers.google.com/apis/api/firebaseappcheck.googleapis.com/overview?project=YOUR_PROJECT_ID`).
    - For Android, register your app with Play Integrity.
    - During development, add the debug token (printed in the Flutter console on first run with App Check) to the "Apps" section of App Check in the Firebase console.
    - Add your app's SHA-1 and SHA-256 fingerprints to your Firebase project settings (Project settings > Your apps > Android app).
